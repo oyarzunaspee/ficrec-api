@@ -43,9 +43,9 @@ class RecListConfig(BaseModel):
 class User(Document):
     username: str = Field(...)
     password: SecretStr = Field(..., exclude=True)
-    bio: str = Field(None)
-    avatar: Base64Str = Field(None)
-    highlight: str = Field(None)
+    bio: str | None = None
+    avatar: Base64Str | None = None
+    highlight: str | None = None
     dark_mode: bool = False
     is_active: bool = Field(True, exclude=True)
 
@@ -68,7 +68,7 @@ class User(Document):
 class RecList(Document):
     user_id: str = Field(..., frozen=True)
     name: str
-    about: str = Field(None)
+    about: str | None = None
     config: RecListConfig = Field(None, exclude=True)
     private: bool = False
     created: str = Field(datetime.today().strftime("%d-%m-%Y"), exclude=True, frozen=True)
@@ -82,8 +82,8 @@ class Rec(Document):
     reclist_id: str = Field(..., frozen=True)
     title: str
     author: str
-    summary: str = Field(None)
-    notes: str = Field(None)
+    summary: str | None = None
+    notes: str | None = None
     words: int
     warnings: str
     rating: str
