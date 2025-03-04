@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 import certifi
 from beanie import init_beanie
-from .models import User, RecList, Rec
+from models import User, RecList, Rec
 from redis.asyncio import Redis
 import os
 import pickle

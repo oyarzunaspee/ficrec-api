@@ -1,13 +1,13 @@
 from fastapi import APIRouter, HTTPException, status, Depends, Form
-from .models import User, Token, RecList, RecListConfig, Rec
+from models import User, Token, RecList, RecListConfig, Rec
 from typing import Annotated
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi_class import endpoint
 from .fastapi_class_view import View
-from .handlers import QueryHandler
+from handlers import QueryHandler
 import nh3
-from .decorators import public_user, auth_user
-from .models import UserForm
+from decorators import public_user, auth_user
+from models import UserForm
 from fastapi_problem.error import BadRequestProblem
 
 

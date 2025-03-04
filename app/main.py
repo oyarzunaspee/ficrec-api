@@ -1,6 +1,6 @@
 from fastapi import FastAPI
-from .routes import auth_router, profile_router, public_router
-from .connection import lifespan
+from routes import auth_router, profile_router, public_router
+from connection import lifespan
 from dotenv import load_dotenv
 import fastapi_problem.handler
 from fastapi.middleware.cors import CORSMiddleware
