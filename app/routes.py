@@ -1,14 +1,23 @@
 from fastapi import APIRouter, HTTPException, status, Depends, Form
-from models import User, Token, RecList, RecListConfig, Rec
-from typing import List, Annotated
+from .models import User, Token, RecList, RecListConfig, Rec
+from typing import Annotated
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi_class import endpoint
+from .fastapi_class_view import View
+from .handlers import QueryHandler
 import nh3
+from .decorators import public_user, auth_user
+from .models import UserForm
+from fastapi_problem.error import BadRequestProblem
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/users/login")
 
-users_router = APIRouter(prefix="/users")
-profile_router = APIRouter(prefix="/profile")
-public_router = APIRouter(prefix="")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+
+auth_router = APIRouter(prefix="/auth", tags=["auth"])
+profile_router = APIRouter(prefix="/profile", tags=["profile"])
+public_router = APIRouter(prefix="", tags=["public"])
+
 
 
 """
@@ -16,30 +25,32 @@ FOR AUTH
 """
 
 # POST NEW USER (REGISTER)
+@auth_router.post("/signup")
+async def create_user(
+        user_form: UserForm
+    ):
+    user_exists = await User.find_by_username(user_form.username)
+    if user_exists:
+        raise BadRequestProblem(detail="Username already taken")
 
-@users_router.post("/signup", description="Create new user")
-async def create_user(username: str =  Form(...), password: str = Form(...)):
-    username = nh3.clean(username)
-    password = nh3.clean(password)
-    user_exists = await User.find_by_username(username)
-    if user_exists is None:
-        try:
-            new_user = User(
-                username = username,
-                password = User.hash_password(password)
-            )
-            await User.insert(new_user)
-            return {"status": status.HTTP_201_CREATED}
-        except Exception as e:
-            return HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error: {e}")
-    else:
-        return HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Error: Username already taken")
+    if user_form.password != user_form.match_password:
+        raise BadRequestProblem(detail="Passwords do not match")
+    
+    new_user = User(
+        username = user_form.username,
+        password = UserForm.hash_password(user_form.password)
+    )
+    await User.insert(new_user)
+    return {"status": status.HTTP_201_CREATED}
+
 
 
 # POST FOR TOKEN (LOG IN)
-
-@users_router.post("/login", description="Login for users")
-async def login(user_form: OAuth2PasswordRequestForm = Depends()):
+@auth_router.post("/login")
+async def login(
+        user_form: Annotated[OAuth2PasswordRequestForm, Depends()]
+    ):
+    
     user_exists = await User.find_by_username(nh3.clean(user_form.username))
     if user_exists is None:
         return HTTPException(status.HTTP_403_FORBIDDEN, detail="Wrong username or password")
@@ -50,167 +61,312 @@ async def login(user_form: OAuth2PasswordRequestForm = Depends()):
     
     token = Token.create_access_token(user_exists)
 
-    return Token(access_token=token)
+    return {"status": status.HTTP_200_OK, "access_token": token}
+
 
 
 """
-AUTH
+AUTHENTICATED
 """
 
-# GET USER COLLECTIONS
 
-@profile_router.get("/collections", response_model=List[RecList], description="List user's collections")
-async def get_user_reclists(token: Token = Depends(oauth2_scheme)):
-    current_user_id = Token(access_token=token).get_current_user()
-    reclists = await RecList.find(RecList.user_id == current_user_id).to_list()
-    return reclists
+# GET USER PROFILE
+@View(profile_router)
+class UserProfileView(QueryHandler):
+    RESPONSE_MODEL  = User
+    key             = "profile"   # user_profile_{user.id}
 
+    @auth_user
+    async def get(self, token: Token = Depends(oauth2_scheme)):
+        redis_query = await self.redis_query(self.user_id)
 
-# POST NEW COLLECTION
+        if redis_query:
+            response = redis_query
+        if not redis_query:
+            response = await self.update_redis_item(self.user_id)
+        await self.redis.close_redis()
 
-@profile_router.post("/collections/new", description="Create collection")
-async def create_reclist(
-        name: Annotated[str, Form()],
-        token: Token = Depends(oauth2_scheme)
-    ):
-    try:
-        current_user_id = Token(access_token=token).get_current_user()
-        new_reclist = RecList(name=nh3.clean(name), user_id=current_user_id, config=RecListConfig())
-        await RecList.insert(new_reclist)
-        return {"status": status.HTTP_201_CREATED}
-    except Exception as e:
-        return HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Error: {e}")
+        return response
 
 
-# PUT COLLECTION
-@profile_router.put(
-        "/collections/{reclist_id}",
-        description = "Edit collection",
-    )
-async def edit_reclist(
-        reclist_id: str,
-        reclist_form: RecList,
-        token: Token = Depends(oauth2_scheme)
-    ):
-    try:
-        reclist = await RecList.get(reclist_id)
-        if not Token.authorize_user(token, reclist.user_id):
-            return {"status": status.HTTP_401_UNAUTHORIZED}
+# GET & POST USER COLLECTIONS
+@View(profile_router, path="/collections")
+class UserCollectionsView(QueryHandler):
+    RESPONSE_MODEL  = RecList
+    key             = "collections"   # user_collections_{user.id}
+
+    @auth_user
+    async def get(self, token: Token = Depends(oauth2_scheme)):
+        redis_query = await self.redis_query(self.user_id)
         
+        if redis_query:
+            response = redis_query
+        if not redis_query:
+            response = await self.update_redis_list(self.user_id)
+        await self.redis.close_redis()
+        return response
+    
+    @auth_user
+    async def post(
+            self,
+            name: Annotated[str, Form(...)],
+            token: Token = Depends(oauth2_scheme)
+        ):
+        current_user_id = self.AUTH(access_token=token).get_current_user()
+
+        new_reclist = self.RESPONSE_MODEL(name=nh3.clean(name), user_id=current_user_id, config=RecListConfig())
+        created = await self.RESPONSE_MODEL.insert(new_reclist)
+
+        await self.redis.open()
+        await self.update_redis_list(self.user_id)
+        await self.redis.close_redis()
+
+        return {"status": status.HTTP_201_CREATED, "created": created}
+
+
+# GET & PUT & DELETE COLLECTION
+@View(profile_router, path="/collections/{reclist_id}")
+class UserCollectionItemView(QueryHandler):
+    RESPONSE_MODEL  = RecList
+    parent_view     = UserCollectionsView   # user_collections_{user.id}
+    key             = "collections_detail"    # user_collections_detail_{reclist.id}
+
+    @auth_user
+    async def get(self, reclist_id: str, token: Token = Depends(oauth2_scheme)):
+        redis_query = await self.redis_query(reclist_id)
+        
+        if redis_query:
+            response = redis_query
+        if not redis_query:
+            response = await self.update_redis_item(reclist_id)
+
+        await self.redis.close_redis()
+        return response
+
+    @endpoint(("PUT"))
+    @auth_user
+    async def update(
+            self, 
+            reclist_id: str,
+            reclist_form: RecList,
+            token: Token = Depends(oauth2_scheme),
+        ):
+        reclist = await self.RESPONSE_MODEL.get(reclist_id)
+  
+        if not self.AUTH.authorize_user(token, reclist.user_id):
+            raise self.unauthorized()
+            
         if reclist_form.name is not None:
             reclist.name = nh3.clean(reclist_form.name)
         if reclist_form.about is not None:
             reclist.about = nh3.clean(reclist_form.about)
         await reclist.replace()
+
+
+        await self.redis.open()
+        # update individual item in redis
+        await self.update_redis_item(reclist_id)
+        # update list that contains item in redis
+        await self.update_redis_parent(self.user_id)
+        await self.redis.close_redis()
+
         return {"status": status.HTTP_200_OK}
-    except Exception as e:
-        return HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Error: {e}")
+
+    @endpoint(("PUT"), path="/privacy")
+    @auth_user
+    async def update_privacy(
+            self, 
+            reclist_id: str,
+            private: Annotated[bool, Form(...)],
+            token: Token = Depends(oauth2_scheme),
+        ):
+        reclist = await self.RESPONSE_MODEL.get(reclist_id)
 
 
-# PRIVATE / UNPRIVATE COLLECTION
-
-@profile_router.put(
-        "/collections/{reclist_id}/private",
-        description = "Edit collection privacy",
-    )
-async def edit_reclist_privacy(
-        reclist_id: str,
-        privacy: Annotated[bool, Form()],
-        token: Token = Depends(oauth2_scheme)
-    ):
-    try:
-        reclist = await RecList.get(reclist_id)
-        if not Token.authorize_user(token, reclist.user_id):
-            return {"status": status.HTTP_401_UNAUTHORIZED}
-        
-        reclist.private = privacy
+        if not self.AUTH.authorize_user(token, reclist.user_id):
+            raise self.unauthorized()
+            
+        reclist.private = private
         await reclist.replace()
+
+        await self.redis.open()
+        # update individual item in redis
+        await self.update_redis_item(reclist_id)
+        # update list that contains item in redis
+        await self.update_redis_parent(self.user_id)
+        await self.redis.close_redis()
+ 
+            
         return {"status": status.HTTP_200_OK}
-    except Exception as e:
-        return HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Error: {e}")
 
+    @endpoint(("PUT"), path="/config")
+    @auth_user
+    async def update_config(
+            self, 
+            reclist_id: str,
+            config_form: RecListConfig,
+            token: Token = Depends(oauth2_scheme),
+        ):
 
-# UPDATE COLLECTION CONFIG
-@profile_router.put("/collections/{reclist_id}/config")
-async def update_reclist_config(reclist_id: str, config_form: RecListConfig, token: Token = Depends(oauth2_scheme)):
-    try:
-        config = RecListConfig(**config_form.model_dump())
-        reclist = await RecList.get(reclist_id)
-        if not Token.authorize_user(token, reclist.user_id):
-            return {"status": status.HTTP_401_UNAUTHORIZED}
-        reclist.config = config
+        reclist = await self.RESPONSE_MODEL.get(reclist_id)
+
+        if not self.AUTH.authorize_user(token, reclist.user_id):
+            raise self.unauthorized()
+            
+        reclist.config = config_form
         await reclist.replace()
+
+        await self.redis.open()
+        # update individual item in redis
+        await self.update_redis_item(reclist_id)
+        # update list that contains item in redis
+        await self.update_redis_parent(self.user_id)
+        await self.redis.close_redis()
+            
         return {"status": status.HTTP_200_OK}
-    except Exception as e:
-        return HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Error: {e}")
 
-
-# DELETE COLLECTION
-
-@profile_router.delete("/collections/{reclist_id}/delete")
-async def delete_reclist(reclist_id: str, token: Token = Depends(oauth2_scheme)):
-    try:
-        reclist = await RecList.get(reclist_id)
-        if not Token.authorize_user(token, reclist.user_id):
-            return {"status": status.HTTP_401_UNAUTHORIZED}
+    @endpoint(("DELETE"))
+    @auth_user
+    async def delete(
+            self, 
+            reclist_id: str,
+            token: Token = Depends(oauth2_scheme),
+        ):
+        reclist = await self.RESPONSE_MODEL.get(reclist_id)
+        if not self.AUTH.authorize_user(token, reclist.user_id):
+            raise self.unoauthorized()
         
         reclist.deleted = True
         await reclist.replace()
+
+        await self.redis.open()
+        # update individual item in redis
+        await self.update_redis_item(reclist_id)
+        # update list that contains item in redis
+        await self.update_redis_parent(self.user_id)
+        await self.redis.close_redis()
+
+            
         return {"status": status.HTTP_200_OK}
-    except Exception as e:
-        return HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Error: {e}")
 
 
-# POST NEW REC
+# GET & POST COLLECTION RECS
+@View(profile_router, path="/collections/{reclist_id}/recs")
+class UserRecsView(QueryHandler):
+    RESPONSE_MODEL  = Rec
+    parent_view     = UserCollectionItemView      # user_collections_{reclist.id} 
+    key             = "collections_detail_recs"     # user_collections_{rec.id}
 
-@profile_router.post("/collections/{reclist_id}/recs/new")
-async def add_rec(reclist_id: str, rec_form: Rec, token: Token = Depends(oauth2_scheme)):
-    reclist = await RecList.get(reclist_id)
-    if not Token.authorize_user(token, reclist.user_id):
-            return {"status": status.HTTP_401_UNAUTHORIZED}
-    try:
-        await Rec.insert(rec_form)
-        return {"status": status.HTTP_200_OK}
-    except Exception as e:
-        return HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Error: {e}")
+    @auth_user
+    async def get(self, reclist_id: str, token: Token = Depends(oauth2_scheme)):
 
+        redis_query = await self.redis_query(self.user_id)
 
-# GET COLLECTION RECS
+        if redis_query:
+            response = redis_query
+        if not redis_query:
+            response = await self.update_redis_item(reclist_id)
 
-@profile_router.get("/collections/{reclist_id}/recs", response_model=List[Rec])
-async def get_reclist_recs(reclist_id: str, token: Token = Depends(oauth2_scheme)):
-    current_user_id = Token(access_token=token).get_current_user()
-    recs = await Rec.find(Rec.user_id == current_user_id, Rec.reclist_id == reclist_id, Rec.deleted == False).to_list()
-    return recs
+        await self.redis.close_redis()
 
+        return response
+    
+    @auth_user
+    async def post(
+            self,
+            reclist_id: str,
+            rec_form: Rec,
+            token: Token = Depends(oauth2_scheme)
+        ):
+        created = await self.RESPONSE_MODEL.insert(rec_form)
 
-# DELETE REC
-@profile_router.delete("/collections/{reclist_id}/recs/{rec_id}/delete")
-async def delete_rec(reclist_id: str, rec_id: str, token: Token = Depends(oauth2_scheme)):
-    try:
-        rec = await Rec.get(rec_id)
-        if not Token.authorize_user(token, rec.user_id):
-            return {"status": status.HTTP_401_UNAUTHORIZED}
+        await self.redis.open()
+        await self.update_redis_list(reclist_id)
+        await self.redis.close_redis()
+
+        return {"status": status.HTTP_201_CREATED, "created": created}
+
+    @auth_user
+    async def delete(
+            self, 
+            reclist_id: str,
+            rec_id: str,
+            token: Token = Depends(oauth2_scheme),
+        ):
+
+        rec = await self.RESPONSE_MODEL.get(rec_id)
+
+        if not self.AUTH.authorize_user(token, rec.user_id):
+            raise self.unauthorized()
+        
         rec.deleted = True
-        rec.replace()
+        await rec.replace()
+
+        await self.redis.open()
+        await self.update_redis_list(reclist_id)
+        await self.redis.close_redis()
+            
         return {"status": status.HTTP_200_OK}
-    except Exception as e:
-        return HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Error: {e}")
+
+
 
 """
-NO AUTH
+PUBLIC
 """
+
+# GET USER PROFILE
+@View(public_router, path="/{username}")
+class ProfileView(QueryHandler):
+    RESPONSE_MODEL  = User
+    key             = "profile"   # public_profile_{user.id}
+
+    @public_user
+    async def get(self, username: str):
+        redis_query = await self.redis_query(self.user_id)
+
+        if redis_query:
+            response = redis_query
+        if not redis_query:
+            response = await self.update_redis_item(self.user_id)
+            await self.redis.close_redis()
+        return response
+
 
 # GET USER COLLECTIONS
-@public_router.get("/{username}/collections", response_model=List[RecList])
-async def get_public_reclists(username: str):
-    user = await User.find_one(User.username == username, User.is_active == True)
-    reclists = await RecList.find(RecList.user_id == str(user.id), RecList.private == False, RecList.deleted == False).to_list()
-    return reclists
+@View(public_router, path="/{username}/collections")
+class PublicProfileView(QueryHandler):
+    RESPONSE_MODEL  = RecList
+    key             = "collections"   # public_collections_{user.id}
+
+    @public_user
+    async def get(self, username: str):
+        redis_query = await self.redis_query(self.user_id)
+
+        
+        if redis_query:
+            response = redis_query
+        if not redis_query:
+            response = await self.update_redis_list(self.user_id)
+
+        await self.redis.close_redis()
+
+        return response
 
 
 # GET USER COLLECTION RECS
-@public_router.get("/{username}/collections/{reclist_id}", response_model=List[Rec])
-async def get_public_reclist_recs(username: str, reclist_id: str):
-    recs = await Rec.find(Rec.reclist_id == reclist_id, Rec.deleted == False).to_list()
-    return recs
+@View(public_router, path="/{username}/collections/{reclist_id}")
+class PublicRecsView(QueryHandler):
+    RESPONSE_MODEL  = Rec
+    key             = "collection_detail_recs"   # public_collections_recs_{reclist.id}
+
+    @public_user
+    async def get(self, username: str, reclist_id: str):
+        redis_query = await self.redis_query(reclist_id)
+        
+        if redis_query:
+            response = redis_query
+        if not redis_query:
+            response = await self.update_redis_list(reclist_id)
+
+        await self.redis.close_redis()
+        return response

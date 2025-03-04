@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, SecretStr, HttpUrl, computed_field
+from pydantic import BaseModel, Field, SecretStr, HttpUrl, field_validator
 from beanie import Document
 from pydantic.types import Base64Str
 from datetime import timedelta, datetime
@@ -6,21 +6,58 @@ from jose import jwt
 from typing import List
 import nh3
 import os
+import re
 from passlib.context import CryptContext
 PW_CONTEXT = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+class UserForm(BaseModel):
+    username: str = Field(..., min_length=4)
+    password: str = Field(..., min_length=6)
+    match_password: str = Field(..., min_length=6)
+
+    @classmethod
+    def hash_password(cls, password: str):
+        return PW_CONTEXT.hash(password)
+
+    @field_validator('username')
+    @classmethod
+    def validate_username(cls, username: str):
+        value = nh3.clean(username)
+
+        if value[0].isnumeric():
+            raise ValueError("username must not start with a number")
+
+        if " " in value:
+            raise ValueError("username must not contain spaces")
+
+        regex = "^[a-z][a-z0-9*_-]+$"
+        if not re.search(regex, value):
+            raise ValueError("invalid username")
+    
+        return value.lower()
+    
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, password: str):
+        value = nh3.clean(password)
+        return value
 
 
 class Token(BaseModel):
     access_token: str
     
     def get_current_user(self):
-        payload = jwt.decode(self.access_token, os.getenv("SECRET_KEY"), algorithms=[os.getenv("ALGORITHM")])
-        user_id: str = payload.get("user_id")
+        payload = jwt.decode(
+            self.access_token, 
+            os.getenv("SECRET_KEY"), 
+            algorithms=[os.getenv("ALGORITHM")]
+        )
+        user_id = payload.get("user_id")
         return user_id
 
     @classmethod
     def create_access_token(cls, user):
-        expire = datetime.now() + timedelta(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
+        expire = datetime.now() + timedelta(int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES")))
         encoded_jwt = jwt.encode(
             dict(user_id=str(user.id), exp=expire),
             os.getenv("SECRET_KEY"),
@@ -33,15 +70,8 @@ class Token(BaseModel):
         current_user = cls(access_token=token).get_current_user()
         return current_user == user_id
 
-class RecListConfig(BaseModel):
-    fandom: bool = False
-    ship: bool = False
-    warnings: bool = False
-    tags: bool = False
-    chapters: bool = False
-
 class User(Document):
-    username: str = Field(...)
+    username: str
     password: SecretStr = Field(..., exclude=True)
     bio: str | None = None
     avatar: Base64Str | None = None
@@ -51,19 +81,29 @@ class User(Document):
 
     class Settings:
         name = "users"
+    
+    @classmethod
+    async def query_item(cls, user_id: str, query_list: bool):
+        user = await User.get(user_id)
+        if user.is_active:
+            return user
+        elif not user.is_active:
+            return None
 
     @classmethod
-    def hash_password(cls, password: str):
-        return PW_CONTEXT.hash(password)
-
-    @classmethod
-    def find_by_username(cls, username: str):
-        username_exists = User.find_one(User.username == username)
-        return username_exists
+    async def find_by_username(cls, username: str):
+        user = await User.find_one(User.username == username)
+        return user
     
     def verify_password(self, password):
         return PW_CONTEXT.verify(password, self.password.get_secret_value())
-    
+
+class RecListConfig(BaseModel):
+    fandom: bool = False
+    ship: bool = False
+    warnings: bool = False
+    tags: bool = False
+    chapters: bool = False    
 
 class RecList(Document):
     user_id: str = Field(..., frozen=True)
@@ -75,7 +115,34 @@ class RecList(Document):
     deleted: bool = Field(False, exclude=True)
 
     class Settings:
-        name = "reclists"
+        name = "reclist"
+
+    @field_validator('name')
+    @classmethod
+    def validate_password(cls, value: str):
+        return nh3.clean(value)
+    
+    @field_validator('about')
+    @classmethod
+    def validate_password(cls, value: str):
+        return nh3.clean(value)
+
+    @classmethod
+    async def query(cls, user_id: str, public: bool = False):
+        if not public:
+            return await cls.find(cls.user_id == user_id, cls.deleted == False).to_list()
+        if public:
+            return await cls.find(cls.user_id == user_id, cls.private == False, cls.deleted == False).to_list()
+    
+    @classmethod
+    async def query_item(cls, reclist_id: str, public: bool = False):
+        reclist = await cls.get(reclist_id)
+        if reclist.private and public:
+            return None
+        elif reclist.deleted:
+            return None
+        else:
+            return reclist
 
 class Rec(Document):
     user_id: str = Field(..., frozen=True)
@@ -91,42 +158,54 @@ class Rec(Document):
     ship: List[str] = []
     tags: List[str] = []
     language: str
-    created: str = Field(datetime.today().strftime("%d-%m-%Y"), exclude=True, frozen=True)
     chapters: str
+    created: str = Field(datetime.today().strftime("%d-%m-%Y"), exclude=True, frozen=True)
     url: HttpUrl
     deleted: bool = Field(False, exclude=True)
 
     class Settings:
         name = "recs"
-
-    @computed_field
-    def word_count(self) -> str:
-        if self.words >= 1000:
-            comma_separated = "{:,}".format(self.words)
-            thousand_chars = str(self.words)[:comma_separated.find(",")]
-            return f"{thousand_chars}k words"
-        else:
-            return f"{self.words} words"
+        
+    @classmethod
+    async def query(cls, reclist_id: str, query_list: bool, public: bool = False):
+        return await Rec.find(Rec.reclist_id == reclist_id, Rec.deleted == False).to_list()
     
-    def clean_data(self):
-        self.title = nh3.clean(self.title)
-        self.author = nh3.clean(self.author)
-        if self.summary:
-            self.summary = nh3.clean(self.summary)
-        if self.notes:
-            self.notes = nh3.clean(self.notes)
-        self.warnings = nh3.clean(self.warnings)
-        self.rating = nh3.clean(self.rating)
-        self.language = nh3.clean(self.language)
-        self.chapters = nh3.clean(self.chapters)
-        self.fandom = self.clean_list(self.fandom)
-        self.ship = self.clean_list(self.ship)
-        self.tags = self.clean_list(self.tags)
+    @field_validator('title')
+    @classmethod
+    def validate_password(cls, value: str):
+        return nh3.clean(value)
     
-    def clean_list(self, list_to_clean: list):
-        if not list_to_clean:
-            return list_to_clean
-        new_list = list()
-        for item in list_to_clean:
-            new_list.append(nh3.clean(item))
-        return new_list
+    @field_validator('summary')
+    @classmethod
+    def validate_password(cls, value: str):
+        return nh3.clean(value)
+    
+    @field_validator('notes')
+    @classmethod
+    def validate_password(cls, value: str):
+        return nh3.clean(value)
+    
+    @field_validator('words')
+    @classmethod
+    def validate_password(cls, value: str):
+        return nh3.clean(value)
+    
+    @field_validator('warnings')
+    @classmethod
+    def validate_password(cls, value: str):
+        return nh3.clean(value)
+    
+    @field_validator('rating')
+    @classmethod
+    def validate_password(cls, value: str):
+        return nh3.clean(value)
+    
+    @field_validator('language')
+    @classmethod
+    def validate_password(cls, value: str):
+        return nh3.clean(value)
+    
+    @field_validator('chapters')
+    @classmethod
+    def validate_password(cls, value: str):
+        return nh3.clean(value)
