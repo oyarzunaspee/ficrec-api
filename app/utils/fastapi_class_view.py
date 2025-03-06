@@ -41,7 +41,7 @@ def View(
         ...         return {"message": "Hello, world!"}
     """
 
-    def _decorator(cls) -> obj:
+    def _decorator(cls) -> object:
         obj = cls()
         cls_based_response_model = getattr(obj, RESPONSE_MODEL_ATTRIBUTE_NAME, {})
         cls_based_response_class = getattr(obj, RESPONSE_CLASS_ATTRIBUTE_NAME, {})
