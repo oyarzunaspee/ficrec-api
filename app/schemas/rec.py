@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import Field, HttpUrl, field_validator
 from beanie import Document
 from datetime import datetime
 from typing import List

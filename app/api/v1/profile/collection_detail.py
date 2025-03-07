@@ -1,9 +1,8 @@
-from fastapi import APIRouter, status, Depends, Form
-from app.schemas import Token, RecList, RecListConfig, ReclistForm
+from fastapi import APIRouter, status, Form, Cookie
+from app.schemas import RecList, RecListConfig, ReclistForm
 from typing import Annotated
 from fastapi_class import endpoint
 from app.utils.decorators import auth_user
-from app.security.oauth import oauth2_scheme
 from app.utils.handlers import QueryHandler
 from app.utils.fastapi_class_view import View
 from .collection import UserCollectionsView
@@ -21,7 +20,7 @@ class UserCollectionItemView(QueryHandler):
     async def get(
             self, 
             reclist_id: str, 
-            token: Token = Depends(oauth2_scheme)
+            access_token: str | None = Cookie(default=None)
         ):
         redis_query = await self.redis_query(reclist_id)
         
@@ -41,14 +40,14 @@ class UserCollectionItemView(QueryHandler):
             self, 
             reclist_id: str,
             reclist_form: ReclistForm,
-            token: Token = Depends(oauth2_scheme),
+            access_token: str | None = Cookie(default=None)
         ):
         try:
             reclist = await self.RESPONSE_MODEL.get(reclist_id)
         except:
             raise self.not_found()
   
-        if not self.AUTH.authorize_user(token, reclist.user_id):
+        if not self.AUTH.authorize_user(access_token, reclist.user_id):
             raise self.unauthorized()
             
         if reclist_form.name is not None:
@@ -71,7 +70,7 @@ class UserCollectionItemView(QueryHandler):
             self, 
             reclist_id: str,
             private: Annotated[bool, Form(...)],
-            token: Token = Depends(oauth2_scheme),
+            access_token: str | None = Cookie(default=None)
         ):
         try:
             reclist = await self.RESPONSE_MODEL.get(reclist_id)
@@ -79,7 +78,7 @@ class UserCollectionItemView(QueryHandler):
             raise self.not_found()
 
 
-        if not self.AUTH.authorize_user(token, reclist.user_id):
+        if not self.AUTH.authorize_user(access_token, reclist.user_id):
             raise self.unauthorized()
             
         reclist.private = private
@@ -99,14 +98,14 @@ class UserCollectionItemView(QueryHandler):
             self, 
             reclist_id: str,
             config_form: RecListConfig,
-            token: Token = Depends(oauth2_scheme),
+            access_token: str | None = Cookie(default=None)
         ):
         try:
             reclist = await self.RESPONSE_MODEL.get(reclist_id)
         except:
             raise self.not_found()
 
-        if not self.AUTH.authorize_user(token, reclist.user_id):
+        if not self.AUTH.authorize_user(access_token, reclist.user_id):
             raise self.unauthorized()
             
         reclist.config = config_form
@@ -124,13 +123,13 @@ class UserCollectionItemView(QueryHandler):
     async def delete(
             self, 
             reclist_id: str,
-            token: Token = Depends(oauth2_scheme),
+            access_token: str | None = Cookie(default=None)
         ):
         try:
             reclist = await self.RESPONSE_MODEL.get(reclist_id)
         except:
             raise self.not_found()
-        if not self.AUTH.authorize_user(token, reclist.user_id):
+        if not self.AUTH.authorize_user(access_token, reclist.user_id):
             raise self.unoauthorized()
         
         reclist.deleted = True
