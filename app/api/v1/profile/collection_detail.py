@@ -6,6 +6,7 @@ from app.utils.decorators import auth_user
 from app.utils.handlers import QueryHandler
 from app.utils.fastapi_class_view import View
 from .collection import UserCollectionsView
+from app.security.token import authorize_user
 
 router = APIRouter()
 
@@ -47,7 +48,7 @@ class UserCollectionItemView(QueryHandler):
         except:
             raise self.not_found()
   
-        if not self.AUTH.authorize_user(access_token, reclist.user_id):
+        if not authorize_user(access_token, reclist.user_id):
             raise self.unauthorized()
             
         if reclist_form.name is not None:
@@ -78,7 +79,7 @@ class UserCollectionItemView(QueryHandler):
             raise self.not_found()
 
 
-        if not self.AUTH.authorize_user(access_token, reclist.user_id):
+        if not authorize_user(access_token, reclist.user_id):
             raise self.unauthorized()
             
         reclist.private = private
@@ -105,7 +106,7 @@ class UserCollectionItemView(QueryHandler):
         except:
             raise self.not_found()
 
-        if not self.AUTH.authorize_user(access_token, reclist.user_id):
+        if not authorize_user(access_token, reclist.user_id):
             raise self.unauthorized()
             
         reclist.config = config_form
@@ -129,7 +130,7 @@ class UserCollectionItemView(QueryHandler):
             reclist = await self.RESPONSE_MODEL.get(reclist_id)
         except:
             raise self.not_found()
-        if not self.AUTH.authorize_user(access_token, reclist.user_id):
+        if not authorize_user(access_token, reclist.user_id):
             raise self.unoauthorized()
         
         reclist.deleted = True

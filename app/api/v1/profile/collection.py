@@ -4,6 +4,7 @@ from typing import Annotated
 from app.utils.decorators import auth_user
 from app.utils.handlers import QueryHandler
 from app.utils.fastapi_class_view import View
+from app.security.token import get_current_user
 
 router = APIRouter()
 
@@ -33,7 +34,7 @@ class UserCollectionsView(QueryHandler):
             name: Annotated[str, Form(...)],
             access_token: str | None = Cookie(default=None)
         ):
-        current_user_id = self.AUTH(access_token=access_token).get_current_user()
+        current_user_id = get_current_user(access_token)
 
         new_reclist = self.RESPONSE_MODEL(
             name=name, 

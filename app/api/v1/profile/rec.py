@@ -4,6 +4,7 @@ from app.utils.decorators import auth_user
 from app.utils.handlers import QueryHandler
 from app.utils.fastapi_class_view import View
 from .collection_detail import UserCollectionItemView
+from app.security.token import authorize_user
 
 router = APIRouter()
 
@@ -61,7 +62,7 @@ class UserRecsView(QueryHandler):
         except:
             raise self.not_found()
 
-        if not self.AUTH.authorize_user(access_token, rec.user_id):
+        if not authorize_user(access_token, rec.user_id):
             raise self.unauthorized()
         
         rec.deleted = True

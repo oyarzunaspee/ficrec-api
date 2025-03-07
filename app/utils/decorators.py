@@ -42,7 +42,12 @@ def auth_user(func):
         if not token:
             raise view.unauthorized("Please log in")
 
-        view.user_id = get_current_user(token.split(" ")[1])
+        try:
+            user_id = get_current_user(token.split(" ")[1])
+        except:
+            raise view.unauthorized("Please log in")
+        
+        view.user_id = user_id
 
         return await func(*args, **kwargs)
     return wrapper
