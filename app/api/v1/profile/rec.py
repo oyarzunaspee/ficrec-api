@@ -1,10 +1,10 @@
-from fastapi import APIRouter, status, Depends
-from app.schemas import Token, Rec
+from fastapi import APIRouter, status, Cookie
+from app.schemas import Rec
 from app.utils.decorators import auth_user
-from app.security.oauth import oauth2_scheme
 from app.utils.handlers import QueryHandler
 from app.utils.fastapi_class_view import View
 from .collection_detail import UserCollectionItemView
+from app.security.token import authorize_user
 
 router = APIRouter()
 
@@ -19,7 +19,7 @@ class UserRecsView(QueryHandler):
     async def get(
             self, 
             reclist_id: str, 
-            token: Token = Depends(oauth2_scheme)
+            access_token: str | None = Cookie(default=None)
         ):
 
         redis_query = await self.redis_query(self.user_id)
@@ -40,7 +40,7 @@ class UserRecsView(QueryHandler):
             self,
             reclist_id: str,
             rec_form: Rec,
-            token: Token = Depends(oauth2_scheme)
+            access_token: str | None = Cookie(default=None)
         ):
         created = await self.RESPONSE_MODEL.insert(rec_form)
 
@@ -55,14 +55,14 @@ class UserRecsView(QueryHandler):
             self, 
             reclist_id: str,
             rec_id: str,
-            token: Token = Depends(oauth2_scheme),
+            access_token: str | None = Cookie(default=None)
         ):
         try:
             rec = await self.RESPONSE_MODEL.get(rec_id)
         except:
             raise self.not_found()
 
-        if not self.AUTH.authorize_user(token, rec.user_id):
+        if not authorize_user(access_token, rec.user_id):
             raise self.unauthorized()
         
         rec.deleted = True

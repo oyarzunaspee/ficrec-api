@@ -1,4 +1,4 @@
-from app.schemas import Token, RecList
+from app.schemas import RecList
 from app.db.redis import RedisClient
 from typing import List
 from fastapi_problem.error import (
@@ -8,17 +8,16 @@ from fastapi_problem.error import (
     NotFoundProblem,
     ConflictProblem
 )
+from app.utils.errors import ExpirationProblem
 
 class QueryHandler:
-    AUTH = Token
-
-    redis = RedisClient()
 
     server_problem = ServerProblem
     bad_request = BadRequestProblem
     unauthorized = UnauthorisedProblem
     not_found = NotFoundProblem
     conflict = ConflictProblem
+    expiration = ExpirationProblem
 
     def __init__(self):
         self.redis = RedisClient()

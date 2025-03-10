@@ -21,3 +21,5 @@ nh3==0.2.20
 asyncio_redis==0.16.0
 fastapi-class==3.7.0
 fastapi_problem==0.10.6
+pydantic_settings==2.8.0
+redis==5.3.0b3

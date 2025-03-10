@@ -1,10 +1,10 @@
-from fastapi import APIRouter, status, Depends, Form
-from app.schemas import Token, RecList, RecListConfig
+from fastapi import APIRouter, status, Form, Cookie
+from app.schemas import RecList, RecListConfig
 from typing import Annotated
 from app.utils.decorators import auth_user
-from app.security.oauth import oauth2_scheme
 from app.utils.handlers import QueryHandler
 from app.utils.fastapi_class_view import View
+from app.security.token import get_current_user
 
 router = APIRouter()
 
@@ -17,7 +17,7 @@ class UserCollectionsView(QueryHandler):
     @auth_user
     async def get(
             self, 
-            token: Token = Depends(oauth2_scheme)
+            access_token: str | None = Cookie(default=None)
         ):
         redis_query = await self.redis_query(self.user_id)
         
@@ -32,9 +32,9 @@ class UserCollectionsView(QueryHandler):
     async def post(
             self,
             name: Annotated[str, Form(...)],
-            token: Token = Depends(oauth2_scheme)
+            access_token: str | None = Cookie(default=None)
         ):
-        current_user_id = self.AUTH(access_token=token).get_current_user()
+        current_user_id = get_current_user(access_token)
 
         new_reclist = self.RESPONSE_MODEL(
             name=name, 

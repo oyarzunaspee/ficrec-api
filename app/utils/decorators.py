@@ -1,5 +1,6 @@
 from functools import wraps
-from app.schemas import User, Token
+from app.schemas import User
+from app.security.token import get_current_user
 
 def public_user(func):
     @wraps(func)
@@ -37,8 +38,16 @@ def auth_user(func):
         view.public = False
         view.base = "auth"
 
-        token = kwargs["token"]
-        view.user_id = Token(access_token=token).get_current_user()
+        token = kwargs["access_token"]
+        if not token:
+            raise view.unauthorized("Please log in")
+
+        try:
+            user_id = get_current_user(token.split(" ")[1])
+        except:
+            raise view.unauthorized("Please log in")
+        
+        view.user_id = user_id
 
         return await func(*args, **kwargs)
     return wrapper

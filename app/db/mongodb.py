@@ -9,17 +9,17 @@ from app.security.config import settings
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> None:
+async def lifespan(app: FastAPI):
     await startup_db_client(app)
     yield
     await shutdown_db_client(app)
 
-async def startup_db_client(app: FastAPI) -> None:
+async def startup_db_client(app: FastAPI):
     app.mongodb_client = AsyncIOMotorClient(
         settings.MONGO_URI,
         tlsCAFile=certifi.where()
     )
     await init_beanie(database=app.mongodb_client.ficrec, document_models=[User, RecList, Rec])
 
-async def shutdown_db_client(app: FastAPI) -> None:
+async def shutdown_db_client(app: FastAPI):
     app.mongodb_client.close()

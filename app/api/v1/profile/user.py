@@ -1,14 +1,12 @@
-from fastapi import APIRouter, Depends, status
-from app.schemas import User, Token, UserProfileForm, UsernameForm, PasswordForm
+from fastapi import APIRouter, status, Cookie
+from app.schemas import User, UserProfileForm, UsernameForm, PasswordForm
 from app.utils.fastapi_class_view import View
 from app.utils.handlers import QueryHandler
 from app.utils.decorators import auth_user
-from app.security.oauth import oauth2_scheme
 from fastapi_class import endpoint
 
 router = APIRouter()
 
-# GET USER PROFILE
 @View(router)
 class UserProfileView(QueryHandler):
     RESPONSE_MODEL  = User
@@ -17,7 +15,7 @@ class UserProfileView(QueryHandler):
     @auth_user
     async def get(
             self, 
-            token: Token = Depends(oauth2_scheme)
+            access_token: str | None = Cookie(default=None)
         ):
         redis_query = await self.redis_query(self.user_id)
 
@@ -34,7 +32,7 @@ class UserProfileView(QueryHandler):
     async def update(
             self, 
             user_form: UserProfileForm,
-            token: Token = Depends(oauth2_scheme),
+            access_token: str | None = Cookie(default=None)
         ):
         try:
             user = User.get(self.user_id)
@@ -56,7 +54,7 @@ class UserProfileView(QueryHandler):
     async def update(
             self, 
             username_form: UsernameForm,
-            token: Token = Depends(oauth2_scheme),
+            access_token: str | None = Cookie(default=None)
         ):
         user = User.get(self.user_id)
 
@@ -77,7 +75,7 @@ class UserProfileView(QueryHandler):
     async def update(
             self, 
             password_form: PasswordForm,
-            token: Token = Depends(oauth2_scheme),
+            access_token: str | None = Cookie(default=None)
         ):
         try:
             user = User.get(self.user_id)
@@ -90,11 +88,11 @@ class UserProfileView(QueryHandler):
         user.password = PasswordForm.hash_password(password_form.password)
         await user.replace()
 
-    @endpoint(("PUT"), path="/deactivate")
+    @endpoint(("PUT"), path="deactivate")
     @auth_user
     async def update(
             self, 
-            token: Token = Depends(oauth2_scheme),
+            access_token: str | None = Cookie(default=None)
         ):
         try:
             user = User.get(self.user_id)
