@@ -1,12 +1,14 @@
 from pydantic import Field, HttpUrl, field_validator
-from beanie import Document
+from beanie import Document, Link
 from datetime import datetime
 from typing import List
 import nh3
+from .user import User
+from .reclist import RecList
 
 class Rec(Document):
-    user_id: str = Field(..., frozen=True)
-    reclist_id: str = Field(..., frozen=True)
+    user: Link[User] = Field(..., frozen=True)
+    reclist: Link[RecList] = Field(..., frozen=True)
     title: str
     author: str
     summary: str | None = None

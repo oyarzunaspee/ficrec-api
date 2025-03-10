@@ -1,32 +1,32 @@
 from pydantic import BaseModel, Field, field_validator
-from beanie import Document
+from beanie import Document, Link
 from datetime import datetime
 import nh3
 from typing import Union
+from .user import User
 
-class ReclistForm(BaseModel):
-    name: str = None
-    about: str = None
-
+class RecListForm(BaseModel):
+    name:       str = None
+    about:      str = None
 
 class RecListConfig(BaseModel):
-    fandom: bool = False
-    ship: bool = False
-    warnings: bool = False
-    tags: bool = False
-    chapters: bool = False    
+    fandom:     bool = False
+    ship:       bool = False
+    warnings:   bool = False
+    tags:       bool = False
+    chapters:   bool = False    
 
 class RecList(Document):
-    user_id: str = Field(..., frozen=True, exclude=True)
-    name: str
-    about: str | None = None
-    config: RecListConfig
-    private: bool = False
-    created: str = Field(datetime.today().strftime("%d-%m-%Y"), exclude=True, frozen=True)
-    deleted: bool = Field(False, exclude=True)
+    user:       Link[User] = Field(..., frozen=True)
+    name:       str
+    about:      str | None = None
+    config:     RecListConfig = RecListConfig()
+    private:    bool = False
+    created:    str = Field(datetime.today().strftime("%d-%m-%Y"), exclude=True, frozen=True)
+    deleted:    bool = Field(False, exclude=True)
 
     class Settings:
-        name = "reclist"
+        name = "recs"
 
     @field_validator('name')
     @classmethod

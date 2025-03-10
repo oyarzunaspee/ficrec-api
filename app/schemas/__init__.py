@@ -1,3 +1,3 @@
 from .user import SignUpForm, User, UserProfileForm, UsernameForm, PasswordForm
-from .collection import RecListConfig, RecList, ReclistForm
+from .reclist import RecListConfig, RecList, RecListForm
 from .rec import Rec

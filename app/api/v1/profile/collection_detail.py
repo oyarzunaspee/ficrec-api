@@ -1,5 +1,5 @@
 from fastapi import APIRouter, status, Form, Cookie
-from app.schemas import RecList, RecListConfig, ReclistForm
+from app.schemas import RecList, RecListConfig, RecListForm
 from typing import Annotated
 from fastapi_class import endpoint
 from app.utils.decorators import auth_user
@@ -40,7 +40,7 @@ class UserCollectionItemView(QueryHandler):
     async def update(
             self, 
             reclist_id: str,
-            reclist_form: ReclistForm,
+            reclist_form: RecListForm,
             access_token: str | None = Cookie(default=None)
         ):
         try:
